@@ -176,6 +176,11 @@
         <target state="translated">"{0}"을(를) "{1}"(으)로 복사하기 위해 하드 링크를 만듭니다.</target>
         <note>LOCALIZATION: {0} and {1} are paths.</note>
       </trans-unit>
+      <trans-unit id="Copy.ReFSCloneComment">
+        <source>Creating ReFS clone of "{0}" into "{1}".</source>
+        <target state="new">Creating ReFS clone of "{0}" into "{1}".</target>
+        <note>LOCALIZATION: {0} and {1} are paths.</note>
+      </trans-unit>
       <trans-unit id="Copy.RetryingAsFileCopy">
         <source>Could not use a link to copy "{0}" to "{1}". Copying the file instead. {2}</source>
         <target state="translated">"{0}"을(를) "{1}"(으)로 복사하는 데 링크를 사용할 수 없습니다. 대신 파일을 복사합니다. {2}</target>

@@ -266,6 +266,10 @@
     <value>Creating symbolic link to copy "{0}" to "{1}".</value>
     <comment>LOCALIZATION: {0} and {1} are paths.</comment>
   </data>
+  <data name="Copy.ReFSCloneComment">
+    <value>Creating ReFS clone of "{0}" into "{1}".</value>
+    <comment>LOCALIZATION: {0} and {1} are paths.</comment>
+  </data>
   <data name="Copy.Retrying">
     <value>MSB3026: Could not copy "{0}" to "{1}". Beginning retry {2} in {3}ms. {4} {5}</value>
     <comment>{StrBegin="MSB3026: "} LOCALIZATION: {0} and {1} are paths. {2} and {3} are numbers. {4} is an optional localized message. {5} is either empty or a string from Copy.FileLocked ("The file is locked by: "{0}"")</comment>

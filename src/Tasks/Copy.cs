@@ -103,6 +103,12 @@ namespace Microsoft.Build.Tasks
         /// </summary>
         public bool UseSymboliclinksIfPossible { get; set; } = s_forceSymlinks;
 
+        /// <summary>
+        /// Create ReFS copy-on-write Clones for the copied files rather than copy the files if the source
+        /// and destination volume for the copy is the same volume and it's using the ReFS filesystem.
+        /// </summary>
+        public bool UseReFsClonesInsteadOfCopies { get; set; } = Traits.Instance.EnableReFsClonesInsteadOfCopies;
+
         public bool SkipUnchangedFiles { get; set; }
 
         [Output]
@@ -255,6 +261,10 @@ namespace Microsoft.Build.Tasks
             {
                 TryCopyViaLink("Copy.SymbolicLinkComment", MessageImportance.Normal, sourceFileState, destinationFileState, ref destinationFileExists, out linkCreated, ref errorMessage, (source, destination, errMessage) => NativeMethods.MakeSymbolicLink(destination, source, ref errorMessage));
             }
+            else if (UseReFsClonesInsteadOfCopies)
+            {
+                TryCopyViaLink("Copy.ReFSCloneComment", MessageImportance.Normal, sourceFileState, destinationFileState, ref destinationFileExists, out linkCreated, ref errorMessage, (source, destination, errMessage) => NativeMethods.MakeReFsClone(destination, source, ref errorMessage));
+            }
 
             // If the link was not created (either because the user didn't want one, or because it couldn't be created)
             // then let's copy the file
@@ -288,7 +298,7 @@ namespace Microsoft.Build.Tasks
                 destinationFileExists = destinationFileState.FileExists;
             }
 
-            // CreateHardLink and CreateSymbolicLink cannot overwrite an existing file or link
+            // CreateHardLink, CreateSymbolicLink, and CreateReFsClonme cannot overwrite an existing file or link
             // so we need to delete the existing entry before we create the hard or symbolic link.
             // We need to do a best-effort check to see if the files are the same
             // if they are the same then we won't delete, just in case they refer to the same
@@ -302,7 +312,7 @@ namespace Microsoft.Build.Tasks
 
             linkCreated = createLink(sourceFileState.Name, destinationFileState.Name, errorMessage);
 
-            if (!linkCreated)
+            if (!linkCreated && errorMessage != null)
             {
                 // This is only a message since we don't want warnings when copying to network shares etc.
                 Log.LogMessageFromResources(messageImportance, "Copy.RetryingAsFileCopy", sourceFileState.Name, destinationFileState.Name, errorMessage);

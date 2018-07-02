@@ -67,6 +67,13 @@ namespace Microsoft.Build.Utilities
         /// </summary>
         public readonly int CopyTaskParallelism = ParseIntFromEnvironmentVariableOrDefault("MSBUILDCOPYTASKPARALLELISM", -1);
 
+        /// <summary>
+        /// Enables Copy task optimizations on ReFS drive volumes for Win10/Server2016 or higher -
+        /// when copying from->to a single ReFS volume, enable the use of ReFS copy-on-write Clone
+        /// creation to avoid the full copy I/O.
+        /// </summary>
+        public readonly bool EnableReFsClonesInsteadOfCopies = Environment.GetEnvironmentVariable("MSBUILDENABLEREFSCLONES") == "1";
+
         private static int ParseIntFromEnvironmentVariableOrDefault(string environmentVariable, int defaultValue)
         {
             return int.TryParse(Environment.GetEnvironmentVariable(environmentVariable), out int result)

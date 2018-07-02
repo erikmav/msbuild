@@ -628,6 +628,8 @@ namespace Microsoft.Build.Tasks
 
         internal const uint COMIMAGE_FLAGS_STRONGNAMESIGNED = 0x08;
 
+        internal const uint FSCTL_DUPLICATE_EXTENTS_TO_FILE = (0x9 << 16) | (0x2 << 14) | (209 << 2);  // winioctl.h: CTL_CODE(FILE_DEVICE_FILE_SYSTEM, 209, METHOD_BUFFERED, FILE_WRITE_DATA)
+
         [StructLayout(LayoutKind.Sequential)]
         internal struct IMAGE_FILE_HEADER
         {
@@ -770,6 +772,39 @@ namespace Microsoft.Build.Tasks
             internal IntPtr pbData;
         }
 
+        [StructLayout(LayoutKind.Explicit)]
+        internal struct LargeInteger
+        {
+            [FieldOffset(0)] public int Low;
+            [FieldOffset(4)] public int High;
+            [FieldOffset(0)] public long QuadPart;
+
+            // use only when QuadPart canot be passed
+            public long ToInt64()
+            {
+                return ((long)this.High << 32) | (uint)this.Low;
+            }
+
+            // just for demonstration
+            public static LargeInteger FromInt64(long value)
+            {
+                return new LargeInteger
+                {
+                    Low = (int)(value),
+                    High = (int)((value >> 32))
+                };
+            }
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct DUPLICATE_EXTENTS_DATA
+        {
+            public IntPtr FileHandle;
+            public LargeInteger SourceFileOffset;
+            public LargeInteger TargetFileOffset;
+            public LargeInteger ByteCount;
+        }
+
         #endregion
 
         #region PInvoke
@@ -786,17 +821,17 @@ namespace Microsoft.Build.Tasks
         [DllImport("libc", SetLastError = true)]
         internal static extern int link(string oldpath, string newpath);
 
-        internal static bool MakeHardLink(string newFileName, string exitingFileName, ref string errorMessage)
+        internal static bool MakeHardLink(string newFileName, string existingFileName, ref string errorMessage)
         {
             bool hardLinkCreated;
             if (NativeMethodsShared.IsWindows)
             {
-                hardLinkCreated = CreateHardLink(newFileName, exitingFileName, IntPtr.Zero /* reserved, must be NULL */);
+                hardLinkCreated = CreateHardLink(newFileName, existingFileName, IntPtr.Zero /* reserved, must be NULL */);
                 errorMessage = hardLinkCreated ? null : Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()).Message;
             }
             else
             {
-                hardLinkCreated = link(exitingFileName, newFileName) == 0;
+                hardLinkCreated = link(existingFileName, newFileName) == 0;
                 errorMessage = hardLinkCreated ? null : "The link() library call failed with the following error code: " + Marshal.GetLastWin32Error();
             }
 
@@ -812,21 +847,97 @@ namespace Microsoft.Build.Tasks
         [DllImport("libc", SetLastError = true)]
         internal static extern int symlink(string oldpath, string newpath);
 
-        internal static bool MakeSymbolicLink(string newFileName, string exitingFileName, ref string errorMessage)
+        internal static bool MakeSymbolicLink(string newFileName, string existingFileName, ref string errorMessage)
         {
             bool symbolicLinkCreated;
             if (NativeMethodsShared.IsWindows)
             {
-                symbolicLinkCreated = CreateSymbolicLink(newFileName, exitingFileName, SymbolicLink.File);
+                symbolicLinkCreated = CreateSymbolicLink(newFileName, existingFileName, SymbolicLink.File);
                 errorMessage = symbolicLinkCreated ? null : Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()).Message;
             }
             else
             {
-                symbolicLinkCreated = symlink(exitingFileName, newFileName) == 0;
+                symbolicLinkCreated = symlink(existingFileName, newFileName) == 0;
                 errorMessage = symbolicLinkCreated ? null : "The link() library call failed with the following error code: " + Marshal.GetLastWin32Error();
             }
 
             return symbolicLinkCreated;
+        }
+
+        //------------------------------------------------------------------------------
+        // ReFS Clone support
+        //------------------------------------------------------------------------------
+        private static Lazy<Dictionary<char, bool>> ReFsVolumeMap = new Lazy<Dictionary<char, bool>>(() =>
+        {
+            DriveInfo[] drives = DriveInfo.GetDrives();
+            var volumeMap = new Dictionary<char, bool>(drives.Length * 2);
+            foreach (DriveInfo drive in drives)
+            {
+                char driveLetter = drive.Name[0];
+                bool isReFs = drive.DriveFormat.Equals("ReFS", StringComparison.OrdinalIgnoreCase);
+
+                // Add under upper and lower case to ensure full coverage of upper and lower case paths.
+                volumeMap[char.ToUpperInvariant(driveLetter)] = isReFs;
+                volumeMap[char.ToLowerInvariant(driveLetter)] = isReFs;
+            }
+
+            return volumeMap;
+        });
+
+        [DllImport("Kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        internal static extern bool DeviceIoControl(
+            Microsoft.Win32.SafeHandles.SafeFileHandle hDevice,
+            uint IoControlCode,
+            [MarshalAs(UnmanagedType.AsAny)] [In] object InBuffer,
+            uint nInBufferSize,
+            [MarshalAs(UnmanagedType.AsAny)] [Out] object OutBuffer,
+            uint nOutBufferSize,
+            ref uint pBytesReturned,
+            IntPtr Overlapped);
+
+        internal static bool MakeReFsClone(string newFileName, string existingFileName, ref string errorMessage)
+        {
+            bool cloneCreated = false;
+            if (NativeMethodsShared.IsWindows)
+            {
+                char newFileDriveLetter = char.ToUpperInvariant(newFileName[0]);
+                char existingFileDriveLetter = char.ToUpperInvariant(existingFileName[0]);
+                if (newFileDriveLetter == existingFileDriveLetter && ReFsVolumeMap.Value[newFileDriveLetter])
+                {
+                    var fi = new FileInfo(existingFileName);
+                    long size = fi.Length;
+                    using (FileStream srcStream = File.OpenRead(existingFileName))
+                    using (FileStream destStream = File.OpenWrite(newFileName))
+                    {
+                        var duplicateExtentsData = new DUPLICATE_EXTENTS_DATA
+                        {
+                            FileHandle = srcStream.SafeFileHandle.DangerousGetHandle(),
+                            SourceFileOffset = LargeInteger.FromInt64(0),
+                            TargetFileOffset = LargeInteger.FromInt64(0),
+                            ByteCount = LargeInteger.FromInt64(size)
+                        };
+
+                        uint bytesReturned = 0;
+                        cloneCreated = DeviceIoControl(
+                            destStream.SafeFileHandle,
+                            FSCTL_DUPLICATE_EXTENTS_TO_FILE,
+                            duplicateExtentsData,
+                            (uint)Marshal.SizeOf(duplicateExtentsData),
+                            null,
+                            0,
+                            ref bytesReturned,
+                            IntPtr.Zero);
+                        errorMessage = cloneCreated ? null : Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()).Message;
+                    }
+                }
+            }
+            else
+            {
+                // AppleFS for instance has a similar clone technology. Perhaps we should use it (if it's not automatic).
+                cloneCreated = false;
+            }
+
+            return cloneCreated;
         }
 
         //------------------------------------------------------------------------------

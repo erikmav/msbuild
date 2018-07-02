@@ -176,6 +176,11 @@
         <target state="translated">ハード リンクを作成して "{0}" を "{1}" にコピーしています。</target>
         <note>LOCALIZATION: {0} and {1} are paths.</note>
       </trans-unit>
+      <trans-unit id="Copy.ReFSCloneComment">
+        <source>Creating ReFS clone of "{0}" into "{1}".</source>
+        <target state="new">Creating ReFS clone of "{0}" into "{1}".</target>
+        <note>LOCALIZATION: {0} and {1} are paths.</note>
+      </trans-unit>
       <trans-unit id="Copy.RetryingAsFileCopy">
         <source>Could not use a link to copy "{0}" to "{1}". Copying the file instead. {2}</source>
         <target state="translated">リンクを使用して "{0}" を "{1}" にコピーできませんでした。代わりにファイルをコピーしています。{2}</target>
