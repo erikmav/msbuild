@@ -13,6 +13,7 @@ using Microsoft.Build.Utilities;
 using Microsoft.Build.Shared;
 using Microsoft.Build.Shared.FileSystem;
 using Microsoft.Build.Eventing;
+using Microsoft.CopyOnWrite;
 
 #nullable disable
 
@@ -60,6 +61,7 @@ namespace Microsoft.Build.Tasks
                 RetryingAsFileCopy = Log.GetResourceMessage("Copy.RetryingAsFileCopy");
                 RemovingReadOnlyAttribute = Log.GetResourceMessage("Copy.RemovingReadOnlyAttribute");
                 SymbolicLinkComment = Log.GetResourceMessage("Copy.SymbolicLinkComment");
+                FileCloneComment = Log.GetResourceMessage("Copy.FileCloneComment");
             }
         }
 
@@ -70,6 +72,7 @@ namespace Microsoft.Build.Tasks
         private static string RetryingAsFileCopy;
         private static string RemovingReadOnlyAttribute;
         private static string SymbolicLinkComment;
+        private static string FileCloneComment;
 
         #region Properties
 
@@ -86,9 +89,14 @@ namespace Microsoft.Build.Tasks
         private static bool s_alwaysRetryCopy = Environment.GetEnvironmentVariable(AlwaysRetryEnvVar) != null;
 
         /// <summary>
-        /// Global flag to force on UseSymboliclinksIfPossible since Microsoft.Common.targets doesn't expose the functionality.
+        /// Global flag to force on UseSymbolicLinksIfPossible since Microsoft.Common.targets doesn't expose the functionality.
         /// </summary>
         private static readonly bool s_forceSymlinks = Environment.GetEnvironmentVariable("MSBuildUseSymboliclinksIfPossible") != null;
+
+        /// <summary>
+        /// Global flag to force on UseFileClonesIfPossible since Microsoft.Common.targets doesn't expose the functionality.
+        /// </summary>
+        private static readonly bool s_forceFileClones = Environment.GetEnvironmentVariable("MSBuildUseFileClonesIfPossible") != null;
 
         private static readonly int s_parallelism = GetParallelismFromEnvironment();
 
@@ -125,6 +133,12 @@ namespace Microsoft.Build.Tasks
         /// rather than copy the files, if it's possible to do so.
         /// </summary>
         public bool UseSymboliclinksIfPossible { get; set; } = s_forceSymlinks;
+
+        /// <summary>
+        /// Create Copy-on-Write links (a.k.a. file clones or reflinks) for the copied files rather
+        /// than copy the files, if it's possible to do so.
+        /// </summary>
+        public bool UseFileClonesIfPossible { get; set; } = s_forceFileClones;
 
         /// <summary>
         /// Fail if unable to create a symbolic or hard link instead of falling back to copy
@@ -278,11 +292,25 @@ namespace Microsoft.Build.Tasks
             string errorMessage = string.Empty;
 
             // If we want to create hard or symbolic links, then try that first
-            if (UseHardlinksIfPossible)
+            if (UseFileClonesIfPossible)
+            {
+                TryCopyViaLink(FileCloneComment, MessageImportance.Normal, sourceFileState, destinationFileState, ref destinationFileExists, out linkCreated, ref errorMessage, (source, destination, errMessage) =>
+                {
+                    ICopyOnWriteFilesystem cow = CopyOnWriteFilesystemFactory.GetInstance();
+                    if (cow.CopyOnWriteLinkSupportedBetweenPaths(source, destination))
+                    {
+                        cow.CloneFile(source, destination);
+                        return true;
+                    }
+
+                    return false;
+                });
+            }
+            else if (UseHardlinksIfPossible && !linkCreated)
             {
                 TryCopyViaLink(HardLinkComment, MessageImportance.Normal, sourceFileState, destinationFileState, ref destinationFileExists, out linkCreated, ref errorMessage, (source, destination, errMessage) => NativeMethods.MakeHardLink(destination, source, ref errorMessage));
             }
-            else if (UseSymboliclinksIfPossible)
+            else if (UseSymboliclinksIfPossible && !linkCreated)
             {
                 TryCopyViaLink(SymbolicLinkComment, MessageImportance.Normal, sourceFileState, destinationFileState, ref destinationFileExists, out linkCreated, ref errorMessage, (source, destination, errMessage) => NativeMethods.MakeSymbolicLink(destination, source, ref errorMessage));
             }

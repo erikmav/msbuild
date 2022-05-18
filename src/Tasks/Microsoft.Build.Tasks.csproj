@@ -967,6 +967,7 @@
     <ProjectReference Include="..\StringTools\StringTools.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="CopyOnWrite" />
     <PackageReference Include="Microsoft.IO.Redist" Condition="'$(FeatureMSIORedist)' == 'true'" />
 
     <PackageReference Include="System.Collections.Immutable" />
